@@ -1,0 +1,23 @@
+[
+    {
+        "event_id": 4624,
+        "timestamp": "2026-10-28T10:00:00Z",
+        "computer": "LAB-PC",
+        "user": "student",
+        "description": "An account successfully logged on"
+    },
+    {
+        "event_id": 1102,
+        "timestamp": "2026-10-28T10:05:00Z",
+        "computer": "LAB-PC",
+        "user": "student",
+        "description": "The audit log was cleared"
+    },
+    {
+        "event_id": 4625,
+        "timestamp": "2026-10-28T10:10:00Z",
+        "computer": "LAB-PC",
+        "user": "student",
+        "description": "An account failed to log on"
+    }
+]

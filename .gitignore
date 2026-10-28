@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Private local planning documents
+PROJECT_END_GOAL.md
+PROJECT_SCHEDULE.md
+LEARNING_RESOURCES.md
