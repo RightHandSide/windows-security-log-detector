@@ -1,5 +1,6 @@
 import sys
 import json
+import argparse
 
 def load_events(filename):
     with open(filename, 'r') as file:
@@ -8,14 +9,14 @@ def load_events(filename):
 def detect_log_clearing(events):
     log_clearing_alerts = []
     for event in events:
-        if event.get("event_id") == 1102:
+        if event.get('event_id') == 1102:
             alert = {
                 "severity": "HIGH",
                 "message": "Windows Security audit log cleared",
-                "computer": event.get("computer", "Unknown"),
-                "user": event.get("user", "Unknown"),
-                "timestamp": event.get("timestamp", "Unknown"),
-                "event_id": event.get("event_id"),
+                "computer": event.get('computer', 'Unknown'),
+                "user": event.get('user', 'Unknown'),
+                "timestamp": event.get('timestamp', 'Unknown'),
+                "event_id": event.get('event_id'),
                 "investigation": "Determine who cleared the log and whether it was authorized."
             }
             log_clearing_alerts.append(alert)
@@ -32,19 +33,30 @@ def print_alerts(alerts):
         print("------------------------------")
 
     for alert in alerts:
-        print(f"[{alert.get("severity")}] {alert.get("message")}")
-        print(f"Computer: {alert.get("computer")}")
-        print(f"User: {alert.get("user")}")
-        print(f"Time: {alert.get("timestamp")}")
-        print(f"Event ID: {alert.get("event_id")}")
-        print(f"Investigation: {alert.get("investigation")}")
+        print(f"[{alert.get('severity')}] {alert.get('message')}")
+        print(f"Computer: {alert.get('computer')}")
+        print(f"User: {alert.get('user')}")
+        print(f"Time: {alert.get('timestamp')}")
+        print(f"Event ID: {alert.get('event_id')}")
+        print(f"Investigation: {alert.get('investigation')}")
         print("------------------------------")
 
 def main():
-    filename = sys.argv[1]
-    events = load_events(filename)
-    log_clearing_alerts = detect_log_clearing(events)
-    print_alerts(log_clearing_alerts)
+    parser = argparse.ArgumentParser(usage="detector.py <events.json>")
+    parser.add_argument("filename", metavar="<events.json>", help="Path to a JSON file containing Windows events.")
+    args = parser.parse_args()
+    filename = args.filename
+    try:
+        events = load_events(filename)
+    except FileNotFoundError:
+        print(f"File does not exist: {filename}")
+        return 2
+    except json.JSONDecodeError:
+        print("File provided cannot be decoded into JSON format.")
+        return 2
+    else:
+        log_clearing_alerts = detect_log_clearing(events)
+        print_alerts(log_clearing_alerts)
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    sys.exit(main())
