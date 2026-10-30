@@ -1,5 +1,7 @@
 from detector import detect_log_clearing
 from detector import print_alerts
+from detector import main
+import sys
 
 successful_login_event = {
         "event_id": 4624,
@@ -59,6 +61,24 @@ def test_detect_log_clearing_two_1102_alert():
     assert len(alerts) == 2
     assert alerts == [log_clearing_alert, log_clearing_alert]
 
+def test_detect_log_clearing_unknown_field():
+    event_without_field = {
+        "event_id": 1102
+    }
+    alert_without_field = {
+        "severity": "HIGH",
+        "message": "Windows Security audit log cleared",
+        "computer": "Unknown",
+        "user": "Unknown",
+        "timestamp": "Unknown",
+        "event_id": 1102,
+        "investigation": "Determine who cleared the log and whether it was authorized."
+    }
+
+    alerts = detect_log_clearing([event_without_field])
+    assert len(alerts) == 1
+    assert alerts == [alert_without_field]
+
 def test_print_alerts_no_alert(capsys):
     print_alerts([])
     captured = capsys.readouterr()
@@ -71,3 +91,33 @@ def test_print_alerts_one_log_clearing_alert(capsys):
     assert "[HIGH] Windows Security audit log cleared" in captured.out
     assert "Event ID: 1102" in captured.out
     assert "Investigation: Determine who cleared the log and whether it was authorized." in captured.out
+
+def test_main_with_missing_file(monkeypatch, capsys, tmp_path):
+    missing_file = tmp_path / "missing.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["detector.py", str(missing_file)]
+    )
+
+    exit_code = main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert f"File does not exist: {missing_file}" in captured.out
+
+def test_main_with_invalid_json(monkeypatch, capsys, tmp_path):
+    invalid_file = tmp_path / "invalid.json"
+    invalid_file.write_text("{invalid json", encoding="utf-8")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["detector.py", str(invalid_file)]
+    )
+
+    exit_code = main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "File provided cannot be decoded into JSON format." in captured.out
