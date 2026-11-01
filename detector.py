@@ -3,8 +3,13 @@ import json
 import argparse
 
 def load_events(filename):
-    with open(filename, 'r') as file:
-        return json.load(file)
+    with open(filename, "r", encoding="utf-8") as file:
+        events = json.load(file)
+        if not isinstance(events, list):
+            raise ValueError("The top-level JSON value must be a list.")
+        if not all(isinstance(event, dict) for event in events):
+            raise ValueError("Every event in the list must be a JSON object.")
+        return events
 
 def detect_log_clearing(events):
     log_clearing_alerts = []
@@ -54,9 +59,13 @@ def main():
     except json.JSONDecodeError:
         print("File provided cannot be decoded into JSON format.")
         return 2
+    except ValueError as error:
+        print(f"Invalid event data: {error}")
+        return 2
     else:
         log_clearing_alerts = detect_log_clearing(events)
         print_alerts(log_clearing_alerts)
+        return 0
 
 if __name__ == '__main__':
     sys.exit(main())

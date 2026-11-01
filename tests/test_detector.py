@@ -121,3 +121,51 @@ def test_main_with_invalid_json(monkeypatch, capsys, tmp_path):
 
     assert exit_code == 2
     assert "File provided cannot be decoded into JSON format." in captured.out
+
+def test_main_rejects_top_level_object(monkeypatch, capsys, tmp_path):
+    invalid_file = tmp_path / "invalid.json"
+    invalid_file.write_text('{"event_id": 1102}', encoding="utf-8")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["detector.py", str(invalid_file)]
+    )
+
+    exit_code = main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "The top-level JSON value must be a list." in captured.out
+
+def test_main_rejects_non_object_events(monkeypatch, capsys, tmp_path):
+    invalid_file = tmp_path / "invalid-events.json"
+    invalid_file.write_text('[null, "hello", 1102]', encoding="utf-8")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["detector.py", str(invalid_file)]
+    )
+
+    exit_code = main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "Every event in the list must be a JSON object." in captured.out
+
+def test_main_returns_zero_for_valid_input(monkeypatch, capsys, tmp_path):
+    valid_file = tmp_path / "valid.json"
+    valid_file.write_text("[]", encoding="utf-8")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["detector.py", str(valid_file)]
+    )
+
+    exit_code = main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "No security alerts found." in captured.out
