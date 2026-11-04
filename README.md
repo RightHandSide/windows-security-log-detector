@@ -2,7 +2,7 @@
 
 A Python learning project for turning Windows security events into explainable suspicious-activity findings.
 
-**Status:** version 1 is specified but not implemented. There are no installation commands, executable examples, or passing-test claims yet.
+**Status:** the reader is functionally complete for the agreed version 1 scope, with 92 passing reader cases. The detector, command-line workflow, and controlled real-log walkthrough are pending. Version 1 is not yet complete.
 
 ## Purpose
 
@@ -17,7 +17,21 @@ The first version will analyze a saved XML export from one computer's Windows Se
 3. Read the findings and the summary of analyzed events, skipped events, and findings produced.
 4. Inspect the original events and explain why the rule triggered and what else could explain the activity.
 
-Setup instructions, the exact command, and verified export instructions will be added as those steps are implemented and checked.
+The tool command and verified export instructions will be added as those steps are implemented and checked.
+
+The package entry point is a scaffold: `python -m security_log_detector` is not usable yet because the command-line implementation is pending. The reader can be exercised through the tests below.
+
+## Development setup
+
+The development environment has been checked on Windows with Python 3.13.11 and pytest 9.2.0. From the project folder in PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest tests/test_reader.py -q -p no:cacheprovider --basetemp=.pytest-tmp
+```
+
+Coverage includes XML parsing and version 1 structure checks, UTF-8/UTF-16, IPv4/IPv6, validation and normalization, skip counts, file errors, and case-insensitive single-computer checks that preserve stored spelling. Deduplication, sorting, and suspicious-activity findings belong to the detector milestone.
 
 ## Worked example of the planned behavior
 
@@ -44,7 +58,7 @@ A finding flags activity for investigation. Repeated typing mistakes or an outda
 Development uses Python, OOP, and `pytest`:
 
 1. Agree on one small behavior and its public interface; record the behavior in `SPEC.md`.
-2. The assistant supplies one test and verifies that it fails for the expected reason.
+2. The assistant supplies one focused test, or a small related batch when requested, and verifies the result. Distinguish a behavioral failure from an environment or collection failure; some coverage tests may already pass.
 3. The author writes enough production code to pass it.
 4. Run the relevant tests, review the implementation, and discuss the behavior.
 5. Review any structural improvements while keeping tests passing, then choose the next behavior.
@@ -71,3 +85,5 @@ No completed investigation or learning conclusion is claimed yet.
 ## Later versions
 
 Live monitoring is planned for version 2 or 3. Its design and exact release placement remain undecided. Other detection rules and input formats can be considered after the first usable workflow is complete; see [version scope](SPEC.md#version-scope).
+
+Supporting exports containing events from multiple computers is another possible future improvement. Version 1 rejects files whose usable failed-sign-in records identify multiple computers; see [input requirements](SPEC.md#input-and-event-selection).
