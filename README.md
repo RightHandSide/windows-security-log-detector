@@ -2,7 +2,7 @@
 
 A Python learning project for turning Windows security events into explainable suspicious-activity findings.
 
-**Status:** the reader is functionally complete for the agreed version 1 scope, with 92 passing reader cases. The detector, command-line workflow, and controlled real-log walkthrough are pending. Version 1 is not yet complete.
+**Status:** the reader and detector are functionally complete for the agreed version 1 scope, with 138 passing tests. The command-line workflow and controlled real-log walkthrough are pending. Version 1 is not yet complete.
 
 ## Purpose
 
@@ -19,7 +19,7 @@ The first version will analyze a saved XML export from one computer's Windows Se
 
 The tool command and verified export instructions will be added as those steps are implemented and checked.
 
-The package entry point is a scaffold: `python -m security_log_detector` is not usable yet because the command-line implementation is pending. The reader can be exercised through the tests below.
+The package entry point is a scaffold: `python -m security_log_detector` is not usable yet because the command-line implementation is pending. The reader and detector can be exercised through the tests below.
 
 ## Development setup
 
@@ -28,10 +28,10 @@ The development environment has been checked on Windows with Python 3.13.11 and 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-.\.venv\Scripts\python.exe -m pytest tests/test_reader.py -q -p no:cacheprovider --basetemp=.pytest-tmp
+.\.venv\Scripts\python.exe -m pytest tests -q --tb=short -p no:cacheprovider --basetemp=.pytest-tmp
 ```
 
-Coverage includes XML parsing and version 1 structure checks, UTF-8/UTF-16, IPv4/IPv6, validation and normalization, skip counts, file errors, and case-insensitive single-computer checks that preserve stored spelling. Deduplication, sorting, and suspicious-activity findings belong to the detector milestone.
+Reader coverage includes XML parsing and version 1 structure checks, UTF-8/UTF-16, IPv4/IPv6, validation and normalization, skip counts, file errors, and case-insensitive single-computer checks that preserve stored spelling. Detector coverage includes deduplication and conflicting copies, deterministic event ordering and evidence spelling, grouping, inclusive rolling windows, suppression and re-arming, IPv4/IPv6 identity, and independent analysis calls. The required behavior is defined in [SPEC.md](SPEC.md).
 
 ## Worked example of the planned behavior
 
@@ -49,7 +49,7 @@ The fifth event would produce one finding containing:
 | Last triggering attempt | `10:05:00Z` |
 | Reason | Five failed sign-ins within five minutes |
 
-This is an illustrative example, not output from an implemented program. The authoritative behavior is in [SPEC.md](SPEC.md).
+This is an illustrative example, not verified command-line output. The detector is implemented; the command-line display and controlled real-log walkthrough are pending. The authoritative behavior is in [SPEC.md](SPEC.md).
 
 A finding flags activity for investigation. Repeated typing mistakes or an outdated saved password can also produce repeated failures. The rule does not prove an attack. A run without findings only means this rule found no qualifying pattern among usable events in the supplied file.
 

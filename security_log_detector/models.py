@@ -13,6 +13,17 @@ class Event:
     target_domain: str
     source_ip: IPv4Address | IPv6Address
 
+@dataclass(frozen=True)
+class RepeatedSignInFinding:
+    first_timestamp: datetime
+    last_timestamp: datetime
+    computer: str
+    target_username: str
+    target_domain: str
+    source_ip: IPv4Address | IPv6Address
+    count: int
+    reason: str
+
 class ReadResult:
     def __init__(self, events, skipped_count):
         self.events = events

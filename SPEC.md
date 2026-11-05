@@ -1,6 +1,6 @@
 # Version 1 specification
 
-**Status:** the reader milestone is implemented. The detector, command-line workflow, and controlled real-log walkthrough remain pending; see [README.md](README.md#development-setup) for verified development setup and reader coverage. The requirements below describe the complete version 1 plan, not a claim that the whole tool is implemented.
+**Status:** the reader and detector milestones are implemented. The command-line workflow and controlled real-log walkthrough remain pending; see [README.md](README.md#development-setup) for verified development setup and coverage. The requirements below describe the complete version 1 plan, not a claim that the whole tool is implemented.
 
 This document defines required behavior. [README.md](README.md) explains the project's purpose, usage, documentation convention, and learning workflow.
 
@@ -37,8 +37,10 @@ Version 1 contains one detection rule. Its purpose is learning to turn Windows e
 - Accept syntactically valid IPv4 and IPv6 source-address strings, storing the parsed address as an `IPv4Address` or `IPv6Address` object. Skip and count a record whose source IP cannot be parsed as either address type. Use address-object equality for grouping, so equivalent IPv6 spellings identify the same source. Display addresses using `str(address)`.
 - Require the computer, log channel, and Windows event record ID used for duplicate identification. Skip records missing that identity and report them.
 - A usable record ID must be an integer in the inclusive range `0` through `2**64 - 1`. Skip and count records with IDs outside that range. Both boundary values are accepted.
-- The detector must count a record only once when its computer, channel, and event record ID match another record in the input. Do not deduplicate solely by timestamp or account. The reader returns usable records in input order, including duplicate copies; deduplication is pending detector work.
-- The detector must sort usable, distinct events by recorded timestamp before detection. XML record order must not affect detection results; sorting is not a reader responsibility.
+- The detector must count a record only once when its computer, channel, and event record ID match another record in the input. Do not deduplicate solely by timestamp or account. The reader returns usable records in input order, including duplicate copies; deduplication belongs to the detector.
+- **Conflicting copies:** for the same record identity (casefolded computer, exact channel, and record ID), the detector raises `ValueError` if copies disagree on stored timestamp, casefolded target domain or username, or source-address identity. Do not silently select a copy or return a partial analysis. Capitalization differences alone in computer, domain, or username are not conflicts, and equivalent source-address objects are not conflicts. Consistent copies count once.
+- **Consistent-copy spelling:** choose the copy whose original `(computer, target_domain, target_username)` tuple is smallest in case-sensitive lexicographic order. Compare computer first, then domain, then username, using the stored trimmed strings. Preserve that copy's complete spelling tuple rather than choosing each field independently. Selection must not depend on input order and must be resolved before that record supplies finding evidence.
+- The detector must sort usable, distinct events by recorded timestamp ascending, then by record ID ascending for equal timestamps, before detection. XML record order must not affect detection results; sorting is not a reader responsibility. Return findings in their triggering events' processing order.
 
 Stop with a clear error if the file cannot be read or the XML cannot be parsed. Do not present a partial analysis as a successful run after such an error. A parseable file may still contain individual unusable events, which are handled by skipping and reporting them.
 
@@ -56,7 +58,7 @@ Count failures separately for each combination of:
 2. Target account domain and username.
 3. Source IP address.
 
-Compare computer, domain, and username case-insensitively using `casefold()`, preserving the original trimmed spelling in evidence. Use source-address object equality, subject to the unresolved IPv4-mapped IPv6 choice below. Different account identities or source IPs belong to different groups. Computer identity remains part of the group key, but the version 1 reader rejects files containing usable records from multiple distinct computers.
+Compare computer, domain, and username case-insensitively using `casefold()`, preserving the original trimmed spelling in evidence. Use source-address object equality. An IPv4 address and its IPv4-mapped IPv6 form belong to separate groups; for example, `192.0.2.10` and `::ffff:192.0.2.10` do not combine their counts. Do not convert mapped IPv6 addresses to IPv4 for grouping. Different account identities or source IPs belong to different groups. Computer identity remains part of the group key, but the version 1 reader rejects files containing usable records from multiple distinct computers.
 
 ### Threshold and time window
 
@@ -69,7 +71,7 @@ This threshold is a learning choice, not a universal security standard.
 ### Findings and suppression
 
 - Emit one finding when a group's rolling count first reaches five.
-- Capture the evidence at that moment: computer, target domain and username, source IP, count of five, earliest and latest timestamps among the five triggering attempts, and a readable reason.
+- Capture the evidence at that moment: computer, target domain and username, source IP, count of five, earliest and latest timestamps among the five triggering attempts, and a readable reason. Use the fifth triggering attempt's original trimmed spelling for computer, target domain, and target username. This is the attempt that brings the group's rolling count to five in timestamp-then-record-ID processing order; it is not necessarily the fifth record in input order.
 - Keep the finding unchanged when later attempts arrive.
 - Suppress additional findings for that group while its rolling count remains at least five.
 - Allow a new finding after that group's rolling count has dropped below five and subsequently reaches five again.
@@ -96,7 +98,7 @@ Invalid-file errors must clearly indicate that analysis could not be completed. 
 | `XmlEventReader` class | Read XML, select and validate events, produce event objects and report unusable records | `tests/test_reader.py`: `TestXmlEventReader` |
 | Event data class | Carry a usable event's timestamp, grouping fields, and record identity | Covered through reader and detector behavior |
 | `RepeatedSignInDetector` class | Deduplicate, sort, group, apply windows and suppression, and return findings | `tests/test_detector.py`: `TestRepeatedSignInDetector` |
-| Finding data class | Carry the triggering evidence and reason | Covered through detector behavior |
+| `RepeatedSignInFinding` frozen data class | Carry the repeated-failed-sign-in evidence and reason | Covered through detector behavior |
 | Small command-line entry function | Accept a path, connect the modules, and display results or errors | `tests/test_cli.py`: `TestCli` |
 
 The detector accepts event objects rather than XML, so its rule can be tested without constructing XML. It returns findings rather than printing them. The reader does not decide whether activity is suspicious. No inheritance hierarchy or plugin framework is required.
@@ -118,6 +120,21 @@ Each usable record is represented by an `Event` data class with these public att
 
 XML source paths above are relative to a namespaced `Event` element; child elements use the same Windows event namespace.
 
+The agreed detector interface is `RepeatedSignInDetector().detect(events: list[Event]) -> list[RepeatedSignInFinding]`, defined in `security_log_detector/detector.py`. It accepts usable Event objects supplied by the reader. Each call analyzes its supplied events independently, retains no analysis state between calls, and does not modify the input list or its Event objects. Empty input returns `[]`. Deduplication, sorting, grouping, windows, and suppression are detector responsibilities; displaying results belongs to the command-line layer.
+
+`RepeatedSignInFinding` is a frozen data class in `security_log_detector/models.py`, specific to this rule, with these public attributes:
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `computer` | `str` | Target computer, preserving original trimmed spelling |
+| `target_domain` | `str` | Target account domain, preserving original trimmed spelling |
+| `target_username` | `str` | Target username, preserving original trimmed spelling |
+| `source_ip` | `IPv4Address` or `IPv6Address` | Source address |
+| `count` | `int` | Five triggering attempts |
+| `first_timestamp` | Timezone-aware UTC `datetime` | Earliest triggering attempt |
+| `last_timestamp` | Timezone-aware UTC `datetime` | Latest triggering attempt |
+| `reason` | `str` | Readable explanation of why the rule triggered |
+
 Other precise public interfaces remain to be agreed before their tests. Tests target observable behavior, not private methods or a required internal algorithm. Use one small failing test at a time unless the author requests a related batch, with implementation written by the author.
 
 ## Acceptance criteria
@@ -131,17 +148,22 @@ The following behaviors will be covered incrementally, rather than by generating
 | Other event types | Ignored for detection |
 | Unreadable file or malformed XML | Clear error; analysis fails |
 | 4625 record missing a required grouping field, timestamp, time zone, or record identity | Record skipped and reported |
-| Same record identity repeated | Counted once; copies cannot manufacture a threshold |
+| Consistent copies of the same record identity | Counted once; copies cannot manufacture a threshold |
+| Copies of one record identity disagree on stored timestamp, casefolded target account, or source-address identity | Detector raises `ValueError`; no partial analysis |
+| Consistent copies have different capitalization | Select the complete lexicographically smallest original spelling tuple, independently of input order |
 | Same events in a different XML order | Equivalent findings |
+| Distinct records have equal timestamps | Process by ascending record ID; return findings in trigger-processing order |
 | Fewer than five failures in a window | No finding |
 | Five failures at minutes 0, 1, 2, 3, and 5 in one group | One finding, count five, range minute 0 through minute 5 |
 | Five failures at minutes 0, 1, 2, 3, and 5 plus one microsecond | No finding; only four remain in the window at the stored timestamp precision |
 | Usable records from multiple distinct computers in one file | Reader raises `ValueError`; no partial analysis |
 | Capitalization variants of the same computer, account domain, or username | Same identity for checks and grouping; preserve original trimmed spelling |
 | Different account domain, username, or source IP within the supported single-computer input | Separate counts |
+| IPv4 source and its IPv4-mapped IPv6 form | Separate groups; counts do not combine |
 | Additional failures while an alerted group's count stays at least five | No additional finding and no change to existing evidence |
 | Count drops below five, then a later burst reaches five | Another finding |
 | Different explicit time-zone offsets representing the same instants | Equivalent window calculations in UTC |
+| Reuse one detector for multiple calls | Each call analyzes only its supplied events; input list and Event objects remain unchanged |
 | Successful run with no findings | Explicit no-findings result and analysis summary |
 | End-to-end command-line run | File input produces the expected findings or errors and summary |
 
@@ -160,15 +182,13 @@ The following behaviors will be covered incrementally, rather than by generating
 
 Resolve these incrementally with the author rather than silently treating suggestions as agreed requirements:
 
-- Public interfaces, command syntax, output layout, and success/error exit behavior.
-- Whether IPv4-mapped IPv6 addresses should be grouped with their corresponding IPv4 addresses. Other name comparisons and text normalization are already settled above.
+- Command-line public interface, command syntax, output layout, and success/error exit behavior. The reader and detector interfaces are already agreed above.
 - Summary accounting for duplicate copies and the command-line analyzed-event count.
-- Handling inconsistent copies of the same record identity and deterministic ordering for simultaneous findings.
 - A supported Python-version policy beyond the verified development environment in [README.md](README.md#development-setup), and a verified Windows XML export procedure. The development dependency setup is already established.
 
 These details do not introduce additional features; they refine how the agreed workflow behaves.
 
-The reader milestone uses the validation rules above and Python's `datetime.fromisoformat` for timestamp parsing, with no additional timestamp grammar or undocumented placeholder list. Further restrictions would be explicit scope changes rather than prerequisites for completing the current reader. Detector grouping, duplicate handling, and command-line accounting will be settled at those interfaces.
+The reader milestone uses the validation rules above and Python's `datetime.fromisoformat` for timestamp parsing, with no additional timestamp grammar or undocumented placeholder list. Further restrictions would be explicit scope changes rather than prerequisites for completing the current reader. Detector grouping and duplicate handling are defined above; command-line accounting remains to be settled at its interface.
 
 ## Completion criteria
 
