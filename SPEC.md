@@ -1,6 +1,6 @@
 # Version 1 specification
 
-**Status:** the reader and detector milestones are implemented. The command-line workflow and controlled real-log walkthrough remain pending; see [README.md](README.md#development-setup) for verified development setup and coverage. The requirements below describe the complete version 1 plan, not a claim that the whole tool is implemented.
+**Status:** version 1 is implemented and its controlled real-log walkthrough is documented. Reader, detector, and CLI behavior are tested; the author has explained the trigger, an innocent explanation, and a detection limit. See [completion evidence](#completion-evidence) and [README.md](README.md#development-setup) for verified setup and coverage.
 
 This document defines required behavior. [README.md](README.md) explains the project's purpose, usage, documentation convention, and learning workflow.
 
@@ -79,17 +79,76 @@ This threshold is a learning choice, not a universal security standard.
 
 In saved-file analysis, expiration follows recorded event time, not the time the program takes to run. A gap can let a group's count fall below five even when no new event occurs during that gap; a subsequent burst may trigger again.
 
-## Command-line result
+## Command-line interface
+
+The agreed command accepts exactly one required positional XML-file path:
+
+```powershell
+python -m security_log_detector "C:\Logs\events.xml"
+```
+
+The supplied file must satisfy the input requirements above. The following command-line behavior is implemented.
+
+### Help and argument handling
+
+| Arguments | Required behavior | Exit status |
+| --- | --- | --- |
+| `-h` or `--help` | Display usage and a short description; perform no analysis | `0` |
+| No file path | Display usage and a missing-path error | `2` |
+| Multiple file paths or an unknown option | Display usage and an argument error | `2` |
+| One file path | Attempt analysis of the supplied file | `0` on completion; `1` on analysis failure |
+
+For `-h` and `--help`, display this agreed description beneath the usage line: `Analyze one Windows Security-log XML export for repeated failed sign-ins.`
+
+### Exit statuses
+
+- `0`: analysis completed, whether or not findings were produced; also used for help.
+- `1`: analysis could not be completed, including file-access failures, malformed XML, unsupported input structure, multiple usable computers, or conflicting event copies. Do not present a successful partial analysis.
+- `2`: incorrect command usage.
+
+The package entry point must propagate the command's exit status to the calling process. Finding suspicious activity does not itself make a completed analysis fail.
+
+### Command-line result
+
+Display plain text in the terminal. Version 1 does not automatically create an output file or provide a Markdown export feature.
+
+Write findings, analysis summaries, no-findings messages, and help to standard output (`stdout`). Write errors and any usage accompanying an argument error to standard error (`stderr`).
 
 Every successful run displays findings and a summary containing:
 
-- Number of events analyzed.
+- Number of events analyzed: distinct usable events after detector deduplication. Consistent copies of the same record identity contribute one analyzed event, regardless of how many copies appear in the file. For example, six usable records containing two consistent copies of one event and four other distinct events represent five analyzed events.
 - Number of events skipped.
 - Number of findings produced.
 
+The summary contains only these three counts. Version 1 does not display a separate duplicate-copy count. The agreed `DetectionResult` therefore does not need a duplicate-copy count field.
+
+Skipped events retain the reader's existing meaning: unusable records counted once per record. Consistent duplicate copies are not skipped events, and intentionally ignored non-4625 events contribute to neither the analyzed count nor the skipped count. A conflicting-copy failure produces no successful analysis summary.
+
 When no finding is produced, explicitly state that no suspicious activity was found by this rule among the usable events in the supplied file. Do not imply that the computer is free of malicious activity.
 
-Invalid-file errors must clearly indicate that analysis could not be completed. Exact output formatting and command syntax will be agreed before their tests are written.
+Use the following agreed result layout, with findings numbered from 1 in detector result order and a blank line between finding blocks and before the summary:
+
+```text
+Finding 1
+Computer: PC-A
+Target account: LAB\alice
+Source IP: 192.0.2.10
+Failed sign-ins: 5
+First attempt (UTC): 2026-11-03T10:00:00Z
+Last attempt (UTC): 2026-11-03T10:05:00Z
+Reason: <the detector's reason text>
+
+Summary
+Events analyzed: 5
+Events skipped: 0
+Findings produced: 1
+```
+
+The example values illustrate the layout, not a completed real-log walkthrough. Substitute each finding's evidence and its detector-provided reason. Display the target account as domain, a backslash, and username. Display timestamps in UTC using `Z`, retaining nonzero fractional seconds at the stored microsecond precision.
+
+With no findings, display exactly `No suspicious activity was found by this rule among the usable events in the supplied file.`, followed by a blank line and the same three-line summary under `Summary`, with the actual counts and zero findings.
+
+Analysis errors must clearly indicate that analysis could not be completed. Help uses the agreed description above; errors identify the problem. Error text is not otherwise fixed verbatim by this specification.
 
 ## OOP responsibilities and test organization
 
@@ -97,11 +156,18 @@ Invalid-file errors must clearly indicate that analysis could not be completed. 
 | --- | --- | --- |
 | `XmlEventReader` class | Read XML, select and validate events, produce event objects and report unusable records | `tests/test_reader.py`: `TestXmlEventReader` |
 | Event data class | Carry a usable event's timestamp, grouping fields, and record identity | Covered through reader and detector behavior |
-| `RepeatedSignInDetector` class | Deduplicate, sort, group, apply windows and suppression, and return findings | `tests/test_detector.py`: `TestRepeatedSignInDetector` |
+| `RepeatedSignInDetector` class | Deduplicate, sort, group, apply windows and suppression, and return findings with analysis accounting when requested | `tests/test_detector.py`: `TestRepeatedSignInDetector` |
+| `DetectionResult` data type | Carry findings and the distinct analyzed-event count | Covered through detector behavior |
 | `RepeatedSignInFinding` frozen data class | Carry the repeated-failed-sign-in evidence and reason | Covered through detector behavior |
 | Small command-line entry function | Accept a path, connect the modules, and display results or errors | `tests/test_cli.py`: `TestCli` |
 
 The detector accepts event objects rather than XML, so its rule can be tested without constructing XML. It returns findings rather than printing them. The reader does not decide whether activity is suspicious. No inheritance hierarchy or plugin framework is required.
+
+The implemented command-line entry interface is `main(argv: list[str] | None = None) -> int` in `security_log_detector/cli.py`. With `argv=None`, read the calling command's arguments, excluding the program name. An explicit list supplies those arguments directly, so a test can call `main([str(xml_path)])`.
+
+`main` displays output on the agreed streams and returns the agreed integer exit status for completed analysis, analysis failure, help, and argument errors. Help and argument errors must return their status rather than raise `SystemExit` to callers of `main`. The package entry point propagates the returned status to the calling process.
+
+CLI tests exercise `main` through `TestCli`, checking observable output and returned statuses with supplied XML files where appropriate. An end-to-end package-command check also verifies argument forwarding and process exit-status propagation; direct function calls alone do not verify that wiring.
 
 The agreed reader interface is `XmlEventReader().read(path)`, returning a result with `events` and `skipped_count`.
 
@@ -122,6 +188,17 @@ XML source paths above are relative to a namespaced `Event` element; child eleme
 
 The agreed detector interface is `RepeatedSignInDetector().detect(events: list[Event]) -> list[RepeatedSignInFinding]`, defined in `security_log_detector/detector.py`. It accepts usable Event objects supplied by the reader. Each call analyzes its supplied events independently, retains no analysis state between calls, and does not modify the input list or its Event objects. Empty input returns `[]`. Deduplication, sorting, grouping, windows, and suppression are detector responsibilities; displaying results belongs to the command-line layer.
 
+The additional agreed interface is `RepeatedSignInDetector().analyze(events: list[Event]) -> DetectionResult`. This interface is implemented. The result has these public attributes:
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `findings` | `list[RepeatedSignInFinding]` | Findings produced by the existing detection rule, in the same order as `detect(events)` |
+| `analyzed_count` | `int` | Number of distinct usable events after detector deduplication, as defined under command-line results |
+
+`analyze(events)` follows the same input-preservation, independent-call, duplicate-conflict, grouping, ordering, window, and suppression contracts as `detect(events)`. Empty input produces an empty findings list and an analyzed count of zero. A conflicting-copy failure raises `ValueError` instead of returning a partial result.
+
+Preserve the existing `detect(events)` interface and behavior. Both public methods share the detection implementation; the command-line layer obtains findings and the analyzed count through `analyze(events)` rather than repeating duplicate-handling logic or reading private detector state.
+
 `RepeatedSignInFinding` is a frozen data class in `security_log_detector/models.py`, specific to this rule, with these public attributes:
 
 | Attribute | Type | Meaning |
@@ -135,7 +212,7 @@ The agreed detector interface is `RepeatedSignInDetector().detect(events: list[E
 | `last_timestamp` | Timezone-aware UTC `datetime` | Latest triggering attempt |
 | `reason` | `str` | Readable explanation of why the rule triggered |
 
-Other precise public interfaces remain to be agreed before their tests. Tests target observable behavior, not private methods or a required internal algorithm. Use one small failing test at a time unless the author requests a related batch, with implementation written by the author.
+The public interfaces above are agreed and implemented. Any future interface changes must be agreed before their tests. Tests target observable behavior, not private methods or a required internal algorithm. Use one small failing test at a time unless the author requests a related batch, with implementation written by the author.
 
 ## Acceptance criteria
 
@@ -178,17 +255,15 @@ The following behaviors will be covered incrementally, rather than by generating
 - The fixed threshold is not tuned for a production environment.
 - Duplicate identity assumes one export from one computer's Security log; merging logs across log resets or different exports is outside the version 1 input contract.
 
-## Details to settle before their implementation tests
+## Runtime support
 
-Resolve these incrementally with the author rather than silently treating suggestions as agreed requirements:
+Version 1 supports Python 3.13 on Windows. Development and testing were performed with Python 3.13.11. Other Python versions have not been verified. This is a documented support policy; do not add a runtime version check for version 1.
 
-- Command-line public interface, command syntax, output layout, and success/error exit behavior. The reader and detector interfaces are already agreed above.
-- Summary accounting for duplicate copies and the command-line analyzed-event count.
-- A supported Python-version policy beyond the verified development environment in [README.md](README.md#development-setup), and a verified Windows XML export procedure. The development dependency setup is already established.
+## Deferred acquisition work
 
-These details do not introduce additional features; they refine how the agreed workflow behaves.
+The [manual practice workflow](README.md#manual-practice-workflow) produced usable real events and a finding on the tested computer. Version 1 analyzes supplied files and provides no collector or exporter. The version 2 requirement is to simplify obtaining and preparing compatible Windows Security logs; its method, interface, and acceptance criteria remain to be agreed before implementation. This does not change version 1 validation or fabricate missing event fields.
 
-The reader milestone uses the validation rules above and Python's `datetime.fromisoformat` for timestamp parsing, with no additional timestamp grammar or undocumented placeholder list. Further restrictions would be explicit scope changes rather than prerequisites for completing the current reader. Detector grouping and duplicate handling are defined above; command-line accounting remains to be settled at its interface.
+The reader milestone uses the validation rules above and Python's `datetime.fromisoformat` for timestamp parsing, with no additional timestamp grammar or undocumented placeholder list. Further restrictions would be explicit scope changes rather than prerequisites for completing the current reader. Detector grouping, duplicate handling, and command-line accounting are defined above.
 
 ## Completion criteria
 
@@ -199,11 +274,18 @@ Version 1 is complete when:
 3. `README.md` includes verified setup, usage, and a worked example, with learning explanations written by the author.
 4. Both documents match the delivered behavior and clearly identify limitations.
 
+## Completion evidence
+
+The reader, detector, CLI, and regression tests implement the software workflow above. The controlled real-event exercise and author reflections below provide evidence for the learning criteria, within the documented limitations.
+
+The earlier real-log exercise demonstrated parsing and skip accounting only. A later controlled network-sign-in batch produced five distinct usable events in one group over 153.187772 seconds; the package command reported five analyzed events, zero skipped events, and one finding with exit status `0`. See [README.md](README.md#controlled-real-finding-7-november-2026) for the observation and tested manual workflow, and [author reflections](README.md#author-reflections) for the author's explanations. Automated collection/export remains version 2 work, with its method to be agreed separately.
+
 ## Version scope
 
 | Version | Scope |
 | --- | --- |
 | 1 | Saved XML analysis with the single repeated-failed-sign-in rule and command-line results |
+| 2 | Simplify obtaining and preparing compatible Windows Security logs; method, interface, and acceptance criteria to be agreed |
 | 2 or 3 | Live monitoring; exact release placement and design to be decided |
 | Later consideration | Other detection rules, additional input formats, configurable thresholds, and successful-sign-in correlation |
 | Future improvement to consider | Support multi-computer exports with defined validation and duplicate-identity rules; no release is assigned |

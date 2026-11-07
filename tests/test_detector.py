@@ -5,7 +5,7 @@ from ipaddress import ip_address
 import pytest
 
 from security_log_detector.detector import RepeatedSignInDetector
-from security_log_detector.models import Event
+from security_log_detector.models import Event, RepeatedSignInFinding
 
 
 def make_event(record_id, timestamp):
@@ -22,6 +22,91 @@ def make_event(record_id, timestamp):
 
 
 class TestRepeatedSignInDetector:
+    def test_analyze_empty_input_returns_no_findings_and_zero_analyzed_count(self):
+        result = RepeatedSignInDetector().analyze([])
+
+        assert result.findings == []
+        assert result.analyzed_count == 0
+
+    def test_analyze_one_event_counts_it_without_a_finding(self):
+        event = make_event(1, datetime(2026, 11, 5, 10, 0, tzinfo=timezone.utc))
+
+        result = RepeatedSignInDetector().analyze([event])
+
+        assert result.findings == []
+        assert result.analyzed_count == 1
+
+    def test_analyze_qualifying_burst_with_consistent_copy_counts_distinct_events(self):
+        events = [
+            make_event(
+                record_id=minute + 1,
+                timestamp=datetime(2026, 11, 5, 10, minute, tzinfo=timezone.utc),
+            )
+            for minute in range(5)
+        ]
+        events.append(replace(events[0]))
+
+        result = RepeatedSignInDetector().analyze(events)
+
+        assert result.analyzed_count == 5
+        assert result.findings == [
+            RepeatedSignInFinding(
+                first_timestamp=datetime(2026, 11, 5, 10, 0, tzinfo=timezone.utc),
+                last_timestamp=datetime(2026, 11, 5, 10, 4, tzinfo=timezone.utc),
+                computer="PC-A",
+                target_username="alice",
+                target_domain="LAB",
+                source_ip=ip_address("192.0.2.10"),
+                count=5,
+                reason="Five failed sign-ins for the same target account on the same computer from the same source IP within five minutes.",
+            )
+        ]
+
+    def test_analyze_capitalization_only_copies_count_as_one_event(self):
+        event = make_event(1, datetime(2026, 11, 5, 10, 0, tzinfo=timezone.utc))
+        copy = replace(event, computer="pc-a", target_domain="lab", target_username="ALICE")
+
+        result = RepeatedSignInDetector().analyze([event, copy])
+
+        assert result.analyzed_count == 1
+        assert result.findings == []
+
+    def test_analyze_conflicting_copy_after_qualifying_burst_raises(self):
+        events = [
+            make_event(
+                record_id=minute + 1,
+                timestamp=datetime(2026, 11, 5, 10, minute, tzinfo=timezone.utc),
+            )
+            for minute in range(5)
+        ]
+        events.append(replace(events[-1], source_ip=ip_address("192.0.2.11")))
+
+        with pytest.raises(ValueError):
+            RepeatedSignInDetector().analyze(events)
+
+    def test_analyze_calls_are_independent_and_preserve_input(self):
+        events = [
+            make_event(
+                record_id=minute + 1,
+                timestamp=datetime(2026, 11, 5, 10, minute, tzinfo=timezone.utc),
+            )
+            for minute in reversed(range(5))
+        ]
+        events.append(replace(events[0]))
+        original_objects = list(events)
+        original_values = [replace(event) for event in events]
+        detector = RepeatedSignInDetector()
+
+        first_result = detector.analyze(events)
+        second_result = detector.analyze([events[0]])
+
+        assert first_result.analyzed_count == 5
+        assert len(first_result.findings) == 1
+        assert second_result.analyzed_count == 1
+        assert second_result.findings == []
+        assert events == original_values
+        assert all(current is original for current, original in zip(events, original_objects))
+
     def test_equivalent_ipv6_spellings_of_distinct_records_form_qualifying_group(self):
         events = [
             replace(

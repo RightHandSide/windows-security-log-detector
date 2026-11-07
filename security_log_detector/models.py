@@ -24,6 +24,11 @@ class RepeatedSignInFinding:
     count: int
     reason: str
 
+@dataclass
+class DetectionResult:
+    analyzed_count: int
+    findings: list[RepeatedSignInFinding]
+
 class ReadResult:
     def __init__(self, events, skipped_count):
         self.events = events
